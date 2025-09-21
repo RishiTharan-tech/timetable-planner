@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Multi-Class Timetable Planner (Teacher Conflict Management)</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.25/jspdf.plugin.autotable.min.js"></script>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background: #f9f9f9; }
+    h2, h3 { text-align: center; color: #333; }
+    .top-container { display: flex; flex-wrap: wrap; gap: 20px; max-width: 1200px; margin: auto; }
+    .form-section {
+      flex: 1; min-width: 280px; background: #fff; padding: 20px;
+      border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+      border: 1px solid #ddd;
+    }
+    label { display: block; margin: 15px 0 5px; font-weight: bold; color: #555; }
+    input, select {
+      width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc;
+      border-radius: 5px; box-sizing: border-box;
+    }
+    button {
+      padding: 10px 15px; background: #007BFF; color: white;
+      border: none; border-radius: 5px; cursor: pointer;
+      margin: 5px 0; font-size: 16px; transition: background 0.3s ease;
+    }
+    button:hover { background: #0056b3; }
+    #generateBtn { background-color: #28a745; }
+    #generateBtn:hover { background-color: #218838; }
+    #exportExcelBtn { background-color: #20c997; }
+    #exportExcelBtn:hover { background-color: #17a2b8; }
+    #exportPdfBtn { background-color: #dc3545; }
+    #exportPdfBtn:hover { background-color: #c82333; }
+    table {
+      width: 100%; border-collapse: collapse; margin-top: 20px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+    }
+    th, td {
+      border: 1px solid #ccc; padding: 12px; text-align: center;
+      min-width: 80px; font-size: 14px;
+    }
+    th { background: #f2f2f2; font-weight: bold; }
+    .break { background: #ffe6e6; font-weight: bold; }
+    .class-box {
+      margin-top: 20px; background: #fefefe; padding: 20px; border-radius: 8px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+    }
+    .timetable-section {
+      max-width: 1200px;
+      margin: 20px auto;
+      background: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+    }
+    ul { list-style-type: none; padding: 0; }
+    li {
+      background: #eef; padding: 8px 12px; margin-bottom: 5px;
+      border-radius: 4px; border: 1px solid #dde;
+    }
+  </style>
+</head>
+<body>
+
+  <h2>Multi-Class Timetable Planner (Teacher Conflict Management)</h2>
+
+  <div class="top-container">
+    <div class="form-section">
+      <h3>Setup</h3>
+      <label>Days (per week):</label>
+      <input type="number" id="numDays" value="5" min="1">
+      
+      <label>Periods per Day:</label>
+      <input type="number" id="numPeriods" value="6" min="1">
+
+      <label>Breaks Before Periods (comma-separated numbers):</label>
+      <input type="text" id="breakAfter" value="2,4" placeholder="e.g. 2,4 for breaks after the 2nd and 4th period">
+
+      <hr style="margin: 20px 0;">
+      <label>Class Name:</label>
+      <input type="text" id="className" placeholder="e.g. Grade 6A">
+      <button onclick="addClass()">➕ Add Class</button>
+
+      <h4>Classes Added:</h4>
+      <ul id="classList"></ul>
+    </div>
+
+    <div class="form-section">
+      <h3>Subjects</h3>
+      <label>Choose Class:</label>
+      <select id="classSelect"></select>
+
+      <label>Subject:</label>
+      <input type="text" id="subjectInput" placeholder="e.g. Mathematics">
+
+      <label>Teacher:</label>
+      <input type="text" id="teacherInput" placeholder="e.g. Mr. Smith">
+
+      <label>Periods per Week:</label>
+      <input type="number" id="subjectPeriods" value="5" min="1">
+
+      <label>Max Periods per Day:</label>
+      <input type="number" id="subjectMaxPerDay" value="2" min="1">
+
+      <button onclick="addSubject()">Add Subject</button>
+
+      <h4>Subjects List:</h4>
+      <ul id="subjectsList"></ul>
+    </div>
+  </div>
+
+  <div class="timetable-section">
+    <h3>Generated Timetables</h3>
+    <button id="generateBtn" onclick="generateAll()">Generate All</button>
+    <button id="exportExcelBtn" onclick="exportAllExcel()">⬇ Export All Excel</button>
+    <button id="exportPdfBtn" onclick="exportAllPDF()">⬇ Export All PDF</button>
+    <div id="timetableContainer"></div>
+  </div>
+
+  <script>
+    let classes = {};
+
+    document.getElementById("className").addEventListener("keypress", function(event) {
+      if (event.key === "Enter") addClass();
+    });
+
+    document.getElementById("subjectPeriods").addEventListener("keypress", function(event) {
+      if (event.key === "Enter") addSubject();
+    });
+
+    function addClass() {
+      let name = document.getElementById("className").value.trim();
+      if (!name) return alert("Please enter a class name.");
+      if (classes[name]) return alert("This class name already exists. Please use a unique name.");
+
+      classes[name] = { subjects: [], timetable: [] };
+
+      let classListUl = document.getElementById("classList");
+      let newLi = document.createElement("li");
+      newLi.textContent = name;
+      classListUl.appendChild(newLi);
+
+      let sel = document.getElementById("classSelect");
+      let newOption = document.createElement("option");
+      newOption.value = name;
+      newOption.textContent = name;
+      sel.appendChild(newOption);
+      sel.value = name;
+
+      document.getElementById("className").value = "";
+      renderSubjects();
+    }
+
+    function addSubject() {
+      let sel = document.getElementById("classSelect");
+      if (!sel.value) return alert("Please add a class first.");
+      
+      let subject = document.getElementById("subjectInput").value.trim();
+      let teacher = document.getElementById("teacherInput").value.trim();
+      let periods = parseInt(document.getElementById("subjectPeriods").value);
+      let maxPerDay = parseInt(document.getElementById("subjectMaxPerDay").value);
+
+      if (!subject || !teacher) return alert("Please enter both a subject and teacher name.");
+      if (isNaN(periods) || periods <= 0) return alert("Periods per week must be a positive number.");
+      if (isNaN(maxPerDay) || maxPerDay <= 0) return alert("Max periods per day must be a positive number.");
+
+      const currentClassSubjects = classes[sel.value].subjects;
+      const isDuplicate = currentClassSubjects.some(s => s.name === subject && s.teacher === teacher);
+      if (isDuplicate) {
+          return alert("This subject with this teacher already exists for this class.");
+      }
+      
+      classes[sel.value].subjects.push({ name: subject, teacher, periods, maxPerDay });
+
+      renderSubjects();
+      document.getElementById("subjectInput").value = "";
+      document.getElementById("teacherInput").value = "";
+    }
+
+    function renderSubjects() {
+      let sel = document.getElementById("classSelect");
+      if (!sel.value) {
+          document.getElementById("subjectsList").innerHTML = "";
+          return;
+      }
+      let list = classes[sel.value].subjects;
+      document.getElementById("subjectsList").innerHTML =
+        list.map(s => `<li>${s.name} - ${s.teacher} (${s.periods}/week, Max ${s.maxPerDay}/day)</li>`).join("");
+    }
+
+    document.getElementById("classSelect").addEventListener("change", renderSubjects);
+
+    function generateTimetableForClass(className, teacherBusy) {
+      const numPeriods = parseInt(document.getElementById("numPeriods").value);
+      const numDays = parseInt(document.getElementById("numDays").value);
+      const breakAfter = document.getElementById("breakAfter").value
+          .split(",")
+          .map(x => parseInt(x.trim()))
+          .filter(x => !isNaN(x) && x > 0 && x <= numPeriods)
+          .sort((a,b) => a - b);
+
+      let subs = JSON.parse(JSON.stringify(classes[className].subjects));
+      if (!subs.length) return [];
+
+      let pool = [];
+      subs.forEach(s => { for (let i = 0; i < s.periods; i++) pool.push(s); });
+      pool = pool.sort(() => Math.random() - 0.5);
+
+      const totalSlots = numPeriods + breakAfter.length;
+      let timetable = Array.from({ length: numDays }, () => Array(totalSlots).fill(""));
+
+      for (let d = 0; d < numDays; d++) {
+        let dailyCount = {};
+        let periodIndex = 0;
+        let breakIndex = 0;
+        for (let p = 0; p < totalSlots; p++) {
+          if (breakIndex < breakAfter.length && periodIndex + 1 === breakAfter[breakIndex]) {
+            timetable[d][p] = "Break";
+            breakIndex++;
+            continue;
+          }
+          
+          let choice = null;
+          let tempPool = [...pool];
+
+          for (let i = 0; i < tempPool.length; i++) {
+            let cand = tempPool[i];
+            
+            if (p > 0 && timetable[d][p-1]?.name === cand.name) continue;
+            
+            if ((dailyCount[cand.name] || 0) >= cand.maxPerDay) continue;
+            
+            if (teacherBusy[d][p] && teacherBusy[d][p] === cand.teacher) continue;
+            
+            choice = cand;
+            const index = pool.findIndex(sub => sub.name === choice.name && sub.teacher === choice.teacher);
+            if (index > -1) {
+              pool.splice(index, 1);
+            }
+            break;
+          }
+
+          if (!choice) {
+            timetable[d][p] = "Free";
+          } else {
+            timetable[d][p] = choice.name + " (" + choice.teacher + ")";
+            teacherBusy[d][p] = choice.teacher;
+            dailyCount[choice.name] = (dailyCount[choice.name] || 0) + 1;
+          }
+          periodIndex++;
+        }
+      }
+      classes[className].timetable = timetable;
+      return timetable;
+    }
+
+    function generateAll() {
+      let container = document.getElementById("timetableContainer");
+      container.innerHTML = "";
+      
+      const numDays = parseInt(document.getElementById("numDays").value);
+      const numPeriods = parseInt(document.getElementById("numPeriods").value);
+      const breakAfter = document.getElementById("breakAfter").value
+          .split(",")
+          .map(x => parseInt(x.trim()))
+          .filter(x => !isNaN(x) && x > 0 && x <= numPeriods)
+          .sort((a,b) => a-b);
+
+      if (Object.keys(classes).length === 0) {
+        alert("Please add at least one class and its subjects before generating.");
+        return;
+      }
+
+      const totalSlots = numPeriods + breakAfter.length;
+      let teacherBusy = Array.from({ length: numDays }, () => Array(totalSlots).fill(null));
+
+      for (let cname in classes) {
+        let table = generateTimetableForClass(cname, teacherBusy);
+        if (!table.length) {
+          container.innerHTML += `<div class="class-box"><h4>${cname}</h4><p>No subjects added for this class.</p></div>`;
+          continue;
+        }
+
+        let html = `<div class="class-box"><h4>${cname}</h4><table><tr><th>Day</th>`;
+        let periodHeader = 1;
+        for (let p = 0; p < table[0].length; p++) {
+          if (table[0][p] === "Break") {
+            html += `<th>Break</th>`;
+          } else {
+            html += `<th>Period ${periodHeader}</th>`;
+            periodHeader++;
+          }
+        }
+        html += "</tr>";
+
+        for (let d = 0; d < table.length; d++) {
+          html += `<tr><td>Day ${d + 1}</td>`;
+          for (let p = 0; p < table[d].length; p++) {
+            let cell = table[d][p];
+            html += `<td ${cell === "Break" ? 'class="break"' : ""}>${cell}</td>`;
+          }
+          html += "</tr>";
+        }
+        html += "</table></div>";
+        container.innerHTML += html;
+      }
+    }
+
+    function exportAllExcel() {
+      if (Object.keys(classes).length === 0) {
+        alert("No timetables to export. Please generate them first.");
+        return;
+      }
+      const wb = XLSX.utils.book_new();
+      for (const cname in classes) {
+        const table = classes[cname].timetable;
+        if (!table || table.length === 0) continue;
+        const numPeriods = parseInt(document.getElementById("numPeriods").value);
+        const breakAfter = document.getElementById("breakAfter").value
+            .split(",")
+            .map(x => parseInt(x.trim()))
+            .filter(x => !isNaN(x) && x > 0 && x <= numPeriods)
+            .sort((a,b) => a-b);
+        
+        const totalSlots = numPeriods + breakAfter.length;
+        let headers = ["Day"];
+        let periodHeader = 1;
+        let breakIndex = 0;
+        for (let p = 0; p < totalSlots; p++) {
+          if (breakIndex < breakAfter.length && periodHeader === breakAfter[breakIndex] + 1) {
+            headers.push("Break");
+            breakIndex++;
+          } else {
+            headers.push("Period " + periodHeader);
+            periodHeader++;
+          }
+        }
+
+        const rows = table.map((row, d) => ["Day " + (d + 1)].concat(row));
+        const wsData = [headers, ...rows];
+        const ws = XLSX.utils.aoa_to_sheet(wsData);
+        XLSX.utils.book_append_sheet(wb, ws, cname);
+      }
+      XLSX.writeFile(wb, "All_Timetables.xlsx");
+    }
+
+    function exportAllPDF() {
+      if (Object.keys(classes).length === 0) {
+        alert("No timetables to export. Please generate them first.");
+        return;
+      }
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF();
+      let y = 10;
+      let pageCount = 0;
+
+      for (const cname in classes) {
+        const table = classes[cname].timetable;
+        if (!table || table.length === 0) continue;
+
+        if (pageCount > 0) {
+          doc.addPage();
+          y = 10;
+        }
+        pageCount++;
+
+        doc.setFontSize(14);
+        doc.text(`${cname} Timetable`, 14, y);
+        y += 6;
+
+        const numPeriods = parseInt(document.getElementById("numPeriods").value);
+        const breakAfter = document.getElementById("breakAfter").value
+            .split(",")
+            .map(x => parseInt(x.trim()))
+            .filter(x => !isNaN(x) && x > 0 && x <= numPeriods)
+            .sort((a,b) => a-b);
+        
+        const totalSlots = numPeriods + breakAfter.length;
+        let headers = ["Day"];
+        let periodHeader = 1;
+        let breakIndex = 0;
+        for (let p = 0; p < totalSlots; p++) {
+          if (breakIndex < breakAfter.length && periodHeader === breakAfter[breakIndex] + 1) {
+            headers.push("Break");
+            breakIndex++;
+          } else {
+            headers.push("Period " + periodHeader);
+            periodHeader++;
+          }
+        }
+        
+        const rows = table.map((row, d) => ["Day " + (d + 1)].concat(row));
+
+        doc.autoTable({
+          head: [headers],
+          body: rows,
+          startY: y,
+          theme: "grid",
+          styles: { font: "helvetica", fontSize: 8 },
+          headStyles: { fillColor: [242, 242, 242], textColor: [0, 0, 0] }
+        });
+        y = doc.lastAutoTable.finalY + 10;
+      }
+      doc.save("All_Timetables.pdf");
+    }
+  </script>
+</body>
+</html>
